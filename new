@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+import csv, time
+from ev3dev2.sensor import INPUT_1, INPUT_2
+from ev3dev2.sensor.lego import ColorSensor
+from ev3dev2.motor import OUTPUT_A, OUTPUT_B, SpeedPercent
+from ev3dev2.motor import MoveDifferential
+from ev3dev2.wheel import EV3Tire
+from pid_controller import PIDController
+
+# Konfiguracja
+left_color_sensor  = ColorSensor(INPUT_1)
+right_color_sensor = ColorSensor(INPUT_2)
+robot = MoveDifferential(OUTPUT_A, OUTPUT_B, EV3Tire, 114)
+
+BLACK = 20
+WHITE = 80
+TARGET = (BLACK + WHITE) / 2
+speed_on_turn = SpeedPercent(20)
+speed = SpeedPercent(25)
+
+# Parametry PID (startowe)
+pid = PIDController(kp=1.0, ki=0.0, kd=0.3, dt=0.05, d_alpha=0.2)
+
+# Log pliku
+log_file = "/home/robot/pid_logs/line_test.csv"
+import os
+os.makedirs(os.path.dirname(log_file), exist_ok=True)
+log = open(log_file, "w", newline="")
+writer = csv.writer(log)
+writer.writerow(["t", "error", "pid_output", "L", "R"])  # nagłówki kolumn
+
+t0 = time.time()
+
+try:
+    print("Start testu PID...")
+    while True:
+        t = time.time() - t0
+        L = left_color_sensor.reflected_light_intensity
+        R = right_color_sensor.reflected_light_intensity
+
+        # Błąd (różnica między czujnikami)
+        error = R - L
+
+        # PID oblicza sterowanie (np. kąt skrętu)
+        pid_output = pid.compute(0.0, error)
+
+        # Ograniczenie wyjścia
+        pid_output = max(-20, min(20, pid_output))
+
+        # Sterowanie robotem
+        if pid_output > 1:
+            robot.turn_right(speed_on_turn, pid_output, brake=False, block=True)
+        elif pid_output < -1:
+            robot.turn_left(speed_on_turn, abs(pid_output), brake=False, block=True)
+        else:
+            robot.on_for_seconds(speed, 0.05, brake=False, block=True)
+
+        # Zapis do logu
+        writer.writerow([t, error, pid_output, L, R])
+
+except KeyboardInterrupt:
+    log.close()
+    robot.off()
+    print("Zapisano log do:", log_file)
